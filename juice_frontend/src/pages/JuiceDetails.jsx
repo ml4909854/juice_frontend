@@ -11,12 +11,12 @@ const JuiceDetails = () => {
   // Main states
   const [juice, setJuice] = useState(null);
   const [reviews, setReviews] = useState([]);
-  const [relatedJuices, setRelatedJuices] = useState([]);
-  const [canReview, setCanReview] = useState(false); // Whether user can write a review
+  const [allJuices, setAllJuices] = useState([]); // Changed from relatedJuices
+  const [canReview, setCanReview] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(true);
   const [reviewLoading, setReviewLoading] = useState(false);
-  const [relatedLoading, setRelatedLoading] = useState(false);
+  const [allJuicesLoading, setAllJuicesLoading] = useState(false); // Changed
   const [error, setError] = useState("");
 
   // Image slider
@@ -28,10 +28,18 @@ const JuiceDetails = () => {
   const [addingToCart, setAddingToCart] = useState(false);
   const [buyNowLoading, setBuyNowLoading] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [hoveredJuice, setHoveredJuice] = useState(null);
+  const [addingToCartMap, setAddingToCartMap] = useState({});
+  const [buyNowLoadingMap, setBuyNowLoadingMap] = useState({});
+  const [wishlistLoadingMap, setWishlistLoadingMap] = useState({});
 
-  // Related juices filters
-  const [relatedSort, setRelatedSort] = useState("new");
-  const [relatedCategory, setRelatedCategory] = useState("all");
+  // All juices pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [sort, setSort] = useState("new");
+  const [category, setCategory] = useState("");
+  const limit = 8;
 
   // Review form
   const [showReviewForm, setShowReviewForm] = useState(false);
@@ -47,12 +55,10 @@ const JuiceDetails = () => {
     checkCanReview();
   }, [id]);
 
-  // Fetch related juices when juice loads or filters change
+  // Fetch all juices when component mounts or filters change
   useEffect(() => {
-    if (juice) {
-      fetchRelatedJuices();
-    }
-  }, [juice, relatedSort, relatedCategory]);
+    fetchAllJuices();
+  }, [currentPage, sort, category]);
 
   const fetchJuiceDetails = async () => {
     setLoading(true);
@@ -84,48 +90,43 @@ const JuiceDetails = () => {
     }
   };
 
-  // Check if current user can review this juice (has ordered and delivered)
+  // Fetch all juices with pagination
+  const fetchAllJuices = async () => {
+    setAllJuicesLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: currentPage,
+        limit,
+        sort,
+        ...(category && { category }),
+      });
+
+      const response = await axios.get(
+        `${import.meta.env.VITE_BACKEND_URL}/juices/search/filter?${params}`,
+      );
+
+      setAllJuices(response.data.juices || []);
+      setTotalPages(response.data.pages || 1);
+      setTotalItems(response.data.total || 0);
+    } catch (err) {
+      console.error("Error fetching juices:", err);
+    } finally {
+      setAllJuicesLoading(false);
+    }
+  };
+
   const checkCanReview = async () => {
     try {
       const token = localStorage.getItem("token");
       if (!token) return;
-      // You need an endpoint like /reviews/can-review/:juiceId
-      // For now, we'll assume false; replace with actual API call
-      // const response = await axios.get(`${import.meta.env.VITE_BACKEND_URL}/reviews/can-review/${id}`, {
-      //   headers: { Authorization: `Bearer ${token}` }
-      // });
-      // setCanReview(response.data.canReview);
-      setCanReview(false); // Placeholder
+      setCanReview(false);
     } catch (err) {
       console.error("Error checking review eligibility:", err);
     }
   };
 
-  const fetchRelatedJuices = async () => {
-    if (!juice) return;
-    setRelatedLoading(true);
-    try {
-      const params = new URLSearchParams({
-        category: relatedCategory === "all" ? juice.category : relatedCategory,
-        limit: 8,
-        sort: relatedSort,
-      });
-      // Add exclude current juice if backend supports
-      const response = await axios.get(
-        `${import.meta.env.VITE_BACKEND_URL}/juices/search/filter?${params}`,
-      );
-      // Filter out current juice
-      const filtered = response.data.juices.filter((j) => j._id !== juice._id);
-      setRelatedJuices(filtered.slice(0, 4)); // Show 4 related juices
-    } catch (err) {
-      console.error("Error fetching related juices:", err);
-    } finally {
-      setRelatedLoading(false);
-    }
-  };
-
-  const handleAddToCart = async () => {
-    setAddingToCart(true);
+  const handleAddToCart = async (juiceId, quantity = 1) => {
+    setAddingToCartMap((prev) => ({ ...prev, [juiceId]: true }));
     try {
       const token = localStorage.getItem("token");
       if (!token) {
@@ -134,50 +135,64 @@ const JuiceDetails = () => {
       }
       await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/cart/add`,
-        { juiceId: id, quantity },
+        { juiceId, quantity },
         { headers: { Authorization: `Bearer ${token}` } },
       );
       showToast("✅ Added to cart successfully!", "green");
     } catch (err) {
       showToast("Failed to add to cart", "red");
     } finally {
-      setAddingToCart(false);
+      setAddingToCartMap((prev) => ({ ...prev, [juiceId]: false }));
     }
   };
 
-  const handleBuyNow = async () => {
-    setBuyNowLoading(true);
+  // Update this function in your JuiceDetails.jsx
+
+  const handleBuyNow = async (juiceId, quantity = 1, juiceData = null) => {
+    setBuyNowLoadingMap((prev) => ({ ...prev, [juiceId]: true }));
     try {
       const token = localStorage.getItem("token");
       if (!token) {
         navigate("/login", { state: { from: `/juices/${id}` } });
         return;
       }
-      await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/cart/add`,
-        { juiceId: id, quantity },
-        { headers: { Authorization: `Bearer ${token}` } },
+
+      // If we have the full juice data from the card, use it
+      if (juiceData) {
+        navigate("/checkout", {
+          state: {
+            directCheckout: true,
+            juice: juiceData, // Pass the full juice data
+            quantity: quantity,
+          },
+        });
+        return;
+      }
+
+      // Otherwise fetch the juice data first (for the main product)
+      const response = await axios.get(
+        `${import.meta.env.VITE_BACKEND_URL}/juices/${juiceId}`,
       );
+
       navigate("/checkout", {
-        state: { directCheckout: true, juice, quantity },
+        state: {
+          directCheckout: true,
+          juice: response.data.juice,
+          quantity: quantity,
+        },
       });
     } catch (err) {
       showToast("Failed to process. Please try again.", "red");
     } finally {
-      setBuyNowLoading(false);
+      setBuyNowLoadingMap((prev) => ({ ...prev, [juiceId]: false }));
     }
   };
 
-  // Fixed wishlist handler (sends empty body, handles duplicate error)
-  // ================= FIXED WISHLIST HANDLER =================
   const handleAddToWishlist = async (juiceId, e) => {
-    // Prevent event bubbling and default behavior
     if (e) {
       e.stopPropagation();
       e.preventDefault();
     }
-
-    console.log("Adding to wishlist - Juice ID:", juiceId); // Debug log
 
     const token = localStorage.getItem("token");
     if (!token) {
@@ -185,22 +200,12 @@ const JuiceDetails = () => {
       return;
     }
 
-    // Ensure we have a valid string ID
-    const targetJuiceId = juiceId || id; // Use provided ID or fallback to page ID
-
-    if (!targetJuiceId || typeof targetJuiceId !== "string") {
-      console.error("Invalid juice ID:", targetJuiceId);
-      showToast("Invalid juice ID", "red");
-      return;
-    }
-
-    setWishlistLoading(true);
+    setWishlistLoadingMap((prev) => ({ ...prev, [juiceId]: true }));
 
     try {
-      // Make sure juiceId is a string in the URL
       const response = await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/wishlists/add/${targetJuiceId}`,
-        {}, // Empty body
+        `${import.meta.env.VITE_BACKEND_URL}/wishlists/add/${juiceId}`,
+        {},
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -209,21 +214,13 @@ const JuiceDetails = () => {
         },
       );
 
-      console.log("Wishlist response:", response.data);
       showToast("❤️ Added to wishlist!", "pink");
     } catch (err) {
-      console.error("Wishlist error:", err.response?.data || err);
-
-      // Handle specific error cases
       if (err.response?.status === 400) {
         showToast(
           err.response?.data?.message || "Already in wishlist!",
           "orange",
         );
-      } else if (
-        err.response?.data?.error?.includes("Cast to ObjectId failed")
-      ) {
-        showToast("Invalid juice ID format", "red");
       } else {
         showToast(
           err.response?.data?.message || "Failed to add to wishlist",
@@ -231,9 +228,10 @@ const JuiceDetails = () => {
         );
       }
     } finally {
-      setWishlistLoading(false);
+      setWishlistLoadingMap((prev) => ({ ...prev, [juiceId]: false }));
     }
   };
+
   const handleSubmitReview = async (e) => {
     e.preventDefault();
     setSubmittingReview(true);
@@ -243,7 +241,6 @@ const JuiceDetails = () => {
         navigate("/login");
         return;
       }
-      // Create FormData for images
       const formData = new FormData();
       formData.append("rating", reviewRating);
       formData.append("comment", reviewComment);
@@ -264,7 +261,7 @@ const JuiceDetails = () => {
       setReviewRating(5);
       setReviewComment("");
       setReviewImages([]);
-      fetchReviews(); // Refresh reviews
+      fetchReviews();
     } catch (err) {
       showToast(
         err.response?.data?.message || "Failed to submit review",
@@ -304,6 +301,36 @@ const JuiceDetails = () => {
       </button>
     ));
   };
+
+  // Calculate discount
+  const calculateDiscount = (price, originalPrice) => {
+    if (!originalPrice || originalPrice <= price) return null;
+    return Math.round(((originalPrice - price) / originalPrice) * 100);
+  };
+
+  // Category options for filter
+  const categories = [
+    { value: "", label: "All Categories" },
+    { value: "detox", label: "Detox" },
+    { value: "vitamin", label: "Vitamin" },
+    { value: "energy", label: "Energy" },
+    { value: "protein", label: "Protein" },
+    { value: "weight-loss", label: "Weight Loss" },
+    { value: "immunity", label: "Immunity" },
+    { value: "hydration", label: "Hydration" },
+    { value: "antioxidant", label: "Antioxidant" },
+    { value: "fitness", label: "Fitness" },
+    { value: "skin", label: "Skin" },
+    { value: "digestive", label: "Digestive" },
+  ];
+
+  // Sort options
+  const sortOptions = [
+    { value: "new", label: "Newest First" },
+    { value: "price_asc", label: "Price: Low to High" },
+    { value: "price_desc", label: "Price: High to Low" },
+    { value: "rating", label: "Top Rated" },
+  ];
 
   if (pageLoading) return <PageLoader text="Loading juice details..." />;
   if (error || !juice)
@@ -451,7 +478,7 @@ const JuiceDetails = () => {
           {/* Product info */}
           <div className="space-y-6">
             <div className="flex items-center gap-2">
-              <span className="px-3 py-1 bg-orange-100 text-orange-600 rounded-full text-sm font-semibold">
+              <span className="px-3 py-1 bg-orange-100 text-orange-600 rounded-full text-sm font-semibold capitalize">
                 {juice.category}
               </span>
               {juice.stock > 0 ? (
@@ -573,27 +600,26 @@ const JuiceDetails = () => {
 
             <div className="flex flex-col sm:flex-row gap-4">
               <button
-                onClick={handleBuyNow}
-                disabled={buyNowLoading || juice.stock <= 0}
+                onClick={() => handleBuyNow(juice._id, quantity)}
+                disabled={buyNowLoadingMap[juice._id] || juice.stock <= 0}
                 className="flex-1 bg-gradient-to-r from-green-600 to-green-500 text-white py-4 rounded-xl font-bold text-lg hover:from-green-700 hover:to-green-600 transition-all transform hover:scale-105 disabled:opacity-50 shadow-lg"
               >
-                {buyNowLoading ? <ButtonLoader /> : "Buy Now"}
+                {buyNowLoadingMap[juice._id] ? <ButtonLoader /> : "Buy Now"}
               </button>
               <button
-                onClick={handleAddToCart}
-                disabled={addingToCart || juice.stock <= 0}
+                onClick={() => handleAddToCart(juice._id, quantity)}
+                disabled={addingToCartMap[juice._id] || juice.stock <= 0}
                 className="flex-1 bg-gradient-to-r from-orange-600 to-orange-500 text-white py-4 rounded-xl font-bold text-lg hover:from-orange-700 hover:to-orange-600 transition-all transform hover:scale-105 disabled:opacity-50 shadow-lg"
               >
-                {addingToCart ? <ButtonLoader /> : "Add to Cart"}
+                {addingToCartMap[juice._id] ? <ButtonLoader /> : "Add to Cart"}
               </button>
-              {/* In the action buttons section, update the wishlist button */}
               <button
-                onClick={(e) => handleAddToWishlist(id, e)} // Pass id directly, not juice object
-                disabled={wishlistLoading}
+                onClick={(e) => handleAddToWishlist(juice._id, e)}
+                disabled={wishlistLoadingMap[juice._id]}
                 className="p-4 border-2 border-orange-600 text-orange-600 rounded-xl hover:bg-orange-50 transition-all transform hover:scale-105"
                 title="Add to Wishlist"
               >
-                {wishlistLoading ? (
+                {wishlistLoadingMap[juice._id] ? (
                   <Loader type="spinner" size="sm" color="orange" />
                 ) : (
                   <svg
@@ -614,6 +640,7 @@ const JuiceDetails = () => {
             </div>
           </div>
         </div>
+
         {/* Reviews Section */}
         <div className="mb-16">
           <div className="flex items-center justify-between mb-6">
@@ -748,79 +775,333 @@ const JuiceDetails = () => {
           )}
         </div>
 
-         {/* Related Juices Section with Sorting */}
+        {/* All Juices Section with Filters and Pagination */}
         <div className="mb-16">
           <div className="flex flex-wrap items-center justify-between mb-6">
             <h2 className="text-3xl font-black bg-gradient-to-r from-orange-600 to-orange-800 bg-clip-text text-transparent">
-              Related Juices
+              All Juices
             </h2>
             <div className="flex gap-4">
               <select
-                value={relatedCategory}
-                onChange={(e) => setRelatedCategory(e.target.value)}
+                value={category}
+                onChange={(e) => {
+                  setCategory(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="px-4 py-2 bg-white border-2 border-gray-200 rounded-xl focus:border-orange-500 outline-none"
               >
-                <option value="all">All Categories</option>
-                <option value={juice.category}>{juice.category}</option>
-                {/* Add more categories if needed */}
+                {categories.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
               </select>
               <select
-                value={relatedSort}
-                onChange={(e) => setRelatedSort(e.target.value)}
+                value={sort}
+                onChange={(e) => {
+                  setSort(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="px-4 py-2 bg-white border-2 border-gray-200 rounded-xl focus:border-orange-500 outline-none"
               >
-                <option value="new">Newest</option>
-                <option value="price_asc">Price: Low to High</option>
-                <option value="price_desc">Price: High to Low</option>
-                <option value="rating">Top Rated</option>
+                {sortOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
-          {relatedLoading ? (
+          {allJuicesLoading ? (
             <div className="flex justify-center py-12">
               <Loader type="bounce" size="lg" color="orange" />
             </div>
-          ) : relatedJuices.length === 0 ? (
-            <p className="text-center text-gray-500">
-              No related juices found.
-            </p>
+          ) : allJuices.length === 0 ? (
+            <p className="text-center text-gray-500 py-12">No juices found.</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {relatedJuices.map((item) => (
-                <div
-                  key={item._id}
-                  onClick={() => navigate(`/juices/${item._id}`)}
-                  className="bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all cursor-pointer overflow-hidden group"
-                >
-                  <div className="relative h-48 overflow-hidden">
-                    <img
-                      src={
-                        item.images?.[0] || "https://via.placeholder.com/300"
-                      }
-                      alt={item.name}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    />
-                  </div>
-                  <div className="p-4">
-                    <h3 className="font-bold text-gray-800 mb-1">
-                      {item.name}
-                    </h3>
-                    <div className="flex items-center justify-between">
-                      <span className="text-lg font-bold text-orange-600">
-                        ₹{item.price}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        {renderStars(Math.floor(item.averageRating || 0))}
-                        <span className="text-xs text-gray-500">
-                          ({item.reviewCount || 0})
-                        </span>
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {allJuices.map((item) => {
+                  const discount = calculateDiscount(
+                    item.price,
+                    item.originalPrice,
+                  );
+                  const isHovered = hoveredJuice === item._id;
+
+                  return (
+                    <div
+                      key={item._id}
+                      onMouseEnter={() => setHoveredJuice(item._id)}
+                      onMouseLeave={() => setHoveredJuice(null)}
+                      className="group relative bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 cursor-pointer overflow-hidden border border-gray-100"
+                      onClick={() => navigate(`/juices/${item._id}`)}
+                    >
+                      {/* Image Container */}
+                      <div className="relative h-48 overflow-hidden">
+                        <img
+                          src={
+                            item.images?.[0] ||
+                            "https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=600&auto=format&fit=crop&q=60"
+                          }
+                          alt={item.name}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        />
+
+                        {/* Gradient Overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+                        {/* Discount Badge */}
+                        {discount && (
+                          <div className="absolute top-3 left-3 bg-gradient-to-r from-red-500 to-red-600 text-white px-2 py-1 rounded-full text-xs font-bold shadow-lg z-10">
+                            {discount}% OFF
+                          </div>
+                        )}
+
+                        {/* Category Badge */}
+                        <div className="absolute top-3 right-12 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-xs font-medium shadow-lg z-10 capitalize">
+                          {item.category}
+                        </div>
+
+                        {/* Wishlist Button */}
+                        <button
+                          onClick={(e) => handleAddToWishlist(item._id, e)}
+                          disabled={wishlistLoadingMap[item._id]}
+                          className="absolute top-3 right-3 w-8 h-8 bg-white/90 backdrop-blur-sm text-orange-600 rounded-lg flex items-center justify-center hover:bg-white hover:scale-110 transition-all shadow-lg z-20"
+                          title="Add to Wishlist"
+                        >
+                          {wishlistLoadingMap[item._id] ? (
+                            <Loader type="spinner" size="sm" color="orange" />
+                          ) : (
+                            <svg
+                              className="w-4 h-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                              />
+                            </svg>
+                          )}
+                        </button>
+
+                        {/* Stock Status */}
+                        {item.stock <= 0 && (
+                          <div className="absolute inset-0 bg-black/70 flex items-center justify-center backdrop-blur-sm z-30">
+                            <span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold text-sm transform -rotate-3 shadow-2xl">
+                              Out of Stock
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Hover Action Buttons */}
+                        <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2 opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all duration-500 z-20">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleBuyNow(item._id, 1);
+                            }}
+                            disabled={
+                              buyNowLoadingMap[item._id] || item.stock <= 0
+                            }
+                            className="bg-gradient-to-r from-green-600 to-green-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:from-green-700 hover:to-green-600 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {buyNowLoadingMap[item._id] ? (
+                              <ButtonLoader />
+                            ) : (
+                              <>
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                                  />
+                                </svg>
+                                Buy Now
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddToCart(item._id, 1);
+                            }}
+                            disabled={
+                              addingToCartMap[item._id] || item.stock <= 0
+                            }
+                            className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:from-orange-700 hover:to-orange-600 transition-all transform hover:scale-105 shadow-lg disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {addingToCartMap[item._id] ? (
+                              <ButtonLoader />
+                            ) : (
+                              <>
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+                                  />
+                                </svg>
+                                Add
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-4">
+                        <h3 className="font-bold text-gray-800 group-hover:text-orange-600 transition-colors line-clamp-1 mb-1">
+                          {item.name}
+                        </h3>
+
+                        {/* Rating */}
+                        <div className="flex items-center gap-1 mb-2">
+                          <div className="flex items-center">
+                            {[...Array(5)].map((_, i) => (
+                              <svg
+                                key={i}
+                                className={`w-3 h-3 ${
+                                  i < Math.floor(item.averageRating || 0)
+                                    ? "text-yellow-400"
+                                    : "text-gray-300"
+                                }`}
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                              >
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              </svg>
+                            ))}
+                          </div>
+                          <span className="text-xs text-gray-500 font-medium">
+                            ({item.reviewCount || 0})
+                          </span>
+                        </div>
+
+                        {/* Description */}
+                        <p className="text-xs text-gray-600 mb-3 line-clamp-2">
+                          {item.description ||
+                            "Freshly squeezed juice packed with nutrients and vitamins."}
+                        </p>
+
+                        {/* Price */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-lg font-bold text-orange-600">
+                            ₹{item.price}
+                          </span>
+                        </div>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-3 mt-12">
+                  <button
+                    onClick={() =>
+                      setCurrentPage((prev) => Math.max(prev - 1, 1))
+                    }
+                    disabled={currentPage === 1 || allJuicesLoading}
+                    className="w-10 h-10 flex items-center justify-center rounded-xl border-2 border-gray-200 hover:border-orange-500 hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all group"
+                  >
+                    <svg
+                      className="w-4 h-4 text-gray-600 group-hover:text-orange-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    {[...Array(totalPages)].map((_, i) => {
+                      const pageNum = i + 1;
+                      if (
+                        pageNum === 1 ||
+                        pageNum === totalPages ||
+                        (pageNum >= currentPage - 1 &&
+                          pageNum <= currentPage + 1)
+                      ) {
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => setCurrentPage(pageNum)}
+                            disabled={allJuicesLoading}
+                            className={`w-10 h-10 rounded-xl font-bold transition-all duration-300 ${
+                              currentPage === pageNum
+                                ? "bg-gradient-to-r from-orange-600 to-orange-500 text-white shadow-lg scale-110"
+                                : "bg-white border-2 border-gray-200 text-gray-700 hover:border-orange-500 hover:text-orange-600"
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      } else if (
+                        pageNum === currentPage - 2 ||
+                        pageNum === currentPage + 2
+                      ) {
+                        return (
+                          <span
+                            key={i}
+                            className="w-8 text-center text-gray-400 font-bold"
+                          >
+                            ...
+                          </span>
+                        );
+                      }
+                      return null;
+                    })}
                   </div>
+
+                  <button
+                    onClick={() =>
+                      setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                    }
+                    disabled={currentPage === totalPages || allJuicesLoading}
+                    className="w-10 h-10 flex items-center justify-center rounded-xl border-2 border-gray-200 hover:border-orange-500 hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all group"
+                  >
+                    <svg
+                      className="w-4 h-4 text-gray-600 group-hover:text-orange-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </button>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -914,6 +1195,18 @@ const JuiceDetails = () => {
         @keyframes slideIn {
           from { transform: translateX(100%); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
+        }
+        .line-clamp-1 {
+          overflow: hidden;
+          display: -webkit-box;
+          -webkit-line-clamp: 1;
+          -webkit-box-orient: vertical;
+        }
+        .line-clamp-2 {
+          overflow: hidden;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
         }
       `}</style>
     </div>

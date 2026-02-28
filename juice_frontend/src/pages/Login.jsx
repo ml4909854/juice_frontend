@@ -44,6 +44,7 @@ const Login = () => {
       // Save to localStorage
       localStorage.setItem("token", response.data.token);
       localStorage.setItem("userId", response.data.userId);
+      localStorage.setItem("email", response.data.email);
       
       // Optional: save email for avatar
       if (rememberMe) {
