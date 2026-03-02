@@ -11,13 +11,22 @@ const JuiceDetails = () => {
   // Main states
   const [juice, setJuice] = useState(null);
   const [reviews, setReviews] = useState([]);
-  const [allJuices, setAllJuices] = useState([]); // Changed from relatedJuices
+  const [displayedReviews, setDisplayedReviews] = useState([]);
+  const [allJuices, setAllJuices] = useState([]);
   const [canReview, setCanReview] = useState(false);
+  const [userPurchased, setUserPurchased] = useState(false);
+  const [hasReviewed, setHasReviewed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(true);
   const [reviewLoading, setReviewLoading] = useState(false);
-  const [allJuicesLoading, setAllJuicesLoading] = useState(false); // Changed
+  const [allJuicesLoading, setAllJuicesLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Pagination for reviews
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewsPerPage] = useState(5);
+  const [hasMoreReviews, setHasMoreReviews] = useState(false);
+  const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
 
   // Image slider
   const [currentImage, setCurrentImage] = useState(0);
@@ -46,19 +55,31 @@ const JuiceDetails = () => {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [reviewImages, setReviewImages] = useState([]);
+  const [imagePreviews, setImagePreviews] = useState([]);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [editReview, setEditReview] = useState(null);
+  const [userReview, setUserReview] = useState(null);
 
   // Fetch juice details and reviews
   useEffect(() => {
     fetchJuiceDetails();
     fetchReviews();
-    checkCanReview();
+    checkUserCanReview();
   }, [id]);
 
   // Fetch all juices when component mounts or filters change
   useEffect(() => {
     fetchAllJuices();
   }, [currentPage, sort, category]);
+
+  // Update displayed reviews when reviews change or page changes
+  useEffect(() => {
+    const start = 0;
+    const end = reviewPage * reviewsPerPage;
+    const newDisplayedReviews = reviews.slice(start, end);
+    setDisplayedReviews(newDisplayedReviews);
+    setHasMoreReviews(end < reviews.length);
+  }, [reviews, reviewPage, reviewsPerPage]);
 
   const fetchJuiceDetails = async () => {
     setLoading(true);
@@ -83,6 +104,20 @@ const JuiceDetails = () => {
         `${import.meta.env.VITE_BACKEND_URL}/reviews/${id}`,
       );
       setReviews(response.data);
+      
+      // Initialize displayed reviews
+      setReviewPage(1);
+      
+      // Check if current user has already reviewed
+      const token = localStorage.getItem("token");
+      if (token) {
+        const userId = localStorage.getItem("userId");
+        const userReview = response.data.find(review => review.user?._id === userId);
+        if (userReview) {
+          setHasReviewed(true);
+          setUserReview(userReview);
+        }
+      }
     } catch (err) {
       console.error("Error fetching reviews:", err);
     } finally {
@@ -90,7 +125,51 @@ const JuiceDetails = () => {
     }
   };
 
-  // Fetch all juices with pagination
+  // Load more reviews
+  const loadMoreReviews = () => {
+    setLoadingMoreReviews(true);
+    // Simulate loading for better UX
+    setTimeout(() => {
+      setReviewPage(prev => prev + 1);
+      setLoadingMoreReviews(false);
+    }, 500);
+  };
+
+  // Check if user can review (has purchased and delivered)
+  const checkUserCanReview = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setCanReview(false);
+        setUserPurchased(false);
+        return;
+      }
+
+      const response = await axios.get(
+        `${import.meta.env.VITE_BACKEND_URL}/orders/my-orders`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Check if user has purchased this juice and it's delivered
+      const purchasedOrder = response.data.orders?.find(order => 
+        order.items?.some(item => 
+          (item.juice?._id === id || item.juiceId?._id === id || item.juiceId === id) && 
+          order.orderStatus === "delivered"
+        )
+      );
+
+      setUserPurchased(!!purchasedOrder);
+      
+      // Can review if purchased AND delivered AND hasn't already reviewed
+      setCanReview(!!purchasedOrder && !hasReviewed);
+
+    } catch (err) {
+      console.error("Error checking purchase status:", err);
+      setCanReview(false);
+      setUserPurchased(false);
+    }
+  };
+
   const fetchAllJuices = async () => {
     setAllJuicesLoading(true);
     try {
@@ -115,16 +194,6 @@ const JuiceDetails = () => {
     }
   };
 
-  const checkCanReview = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) return;
-      setCanReview(false);
-    } catch (err) {
-      console.error("Error checking review eligibility:", err);
-    }
-  };
-
   const handleAddToCart = async (juiceId, quantity = 1) => {
     setAddingToCartMap((prev) => ({ ...prev, [juiceId]: true }));
     try {
@@ -146,8 +215,6 @@ const JuiceDetails = () => {
     }
   };
 
-  // Update this function in your JuiceDetails.jsx
-
   const handleBuyNow = async (juiceId, quantity = 1, juiceData = null) => {
     setBuyNowLoadingMap((prev) => ({ ...prev, [juiceId]: true }));
     try {
@@ -157,19 +224,17 @@ const JuiceDetails = () => {
         return;
       }
 
-      // If we have the full juice data from the card, use it
       if (juiceData) {
         navigate("/checkout", {
           state: {
             directCheckout: true,
-            juice: juiceData, // Pass the full juice data
+            juice: juiceData,
             quantity: quantity,
           },
         });
         return;
       }
 
-      // Otherwise fetch the juice data first (for the main product)
       const response = await axios.get(
         `${import.meta.env.VITE_BACKEND_URL}/juices/${juiceId}`,
       );
@@ -203,7 +268,7 @@ const JuiceDetails = () => {
     setWishlistLoadingMap((prev) => ({ ...prev, [juiceId]: true }));
 
     try {
-      const response = await axios.post(
+      await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/wishlists/add/${juiceId}`,
         {},
         {
@@ -232,8 +297,45 @@ const JuiceDetails = () => {
     }
   };
 
+  // Handle image selection for review
+  const handleReviewImages = (e) => {
+    const files = Array.from(e.target.files);
+    
+    if (files.length > 5) {
+      showToast("Maximum 5 images allowed", "red");
+      return;
+    }
+
+    const invalidFiles = files.filter(file => file.size > 2 * 1024 * 1024);
+    if (invalidFiles.length > 0) {
+      showToast("Each image must be less than 2MB", "red");
+      return;
+    }
+
+    const previews = files.map(file => URL.createObjectURL(file));
+    setImagePreviews(previews);
+    setReviewImages(files);
+  };
+
+  const removeReviewImage = (index) => {
+    const newPreviews = [...imagePreviews];
+    newPreviews.splice(index, 1);
+    setImagePreviews(newPreviews);
+
+    const newFiles = [...reviewImages];
+    newFiles.splice(index, 1);
+    setReviewImages(newFiles);
+  };
+
+  // Submit review
   const handleSubmitReview = async (e) => {
     e.preventDefault();
+    
+    if (!userPurchased) {
+      showToast("You can only review products you have purchased and received!", "orange");
+      return;
+    }
+
     setSubmittingReview(true);
     try {
       const token = localStorage.getItem("token");
@@ -241,34 +343,104 @@ const JuiceDetails = () => {
         navigate("/login");
         return;
       }
+
       const formData = new FormData();
       formData.append("rating", reviewRating);
       formData.append("comment", reviewComment);
       reviewImages.forEach((file) => formData.append("images", file));
 
-      await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/reviews/${id}`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "multipart/form-data",
+      if (editReview) {
+        await axios.patch(
+          `${import.meta.env.VITE_BACKEND_URL}/reviews/${editReview._id}`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "multipart/form-data",
+            },
           },
-        },
-      );
-      showToast("Review submitted successfully!", "green");
+        );
+        showToast("Review updated successfully!", "green");
+      } else {
+        await axios.post(
+          `${import.meta.env.VITE_BACKEND_URL}/reviews/${id}`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "multipart/form-data",
+            },
+          },
+        );
+        showToast("Review submitted successfully!", "green");
+      }
+
+      // Refresh all data after review submission
+      await Promise.all([
+        fetchJuiceDetails(),
+        fetchReviews(),
+      ]);
+      
+      // Recheck review status
+      await checkUserCanReview();
+
+      // Reset form
       setShowReviewForm(false);
       setReviewRating(5);
       setReviewComment("");
       setReviewImages([]);
-      fetchReviews();
+      setImagePreviews([]);
+      setEditReview(null);
+
     } catch (err) {
-      showToast(
-        err.response?.data?.message || "Failed to submit review",
-        "red",
-      );
+      console.error("Review submission error:", err);
+      if (err.response?.status === 403) {
+        showToast("You can only review products you have purchased and received!", "orange");
+      } else {
+        showToast(
+          err.response?.data?.message || "Failed to submit review",
+          "red",
+        );
+      }
     } finally {
       setSubmittingReview(false);
+    }
+  };
+
+  // Edit review
+  const handleEditReview = (review) => {
+    setEditReview(review);
+    setReviewRating(review.rating);
+    setReviewComment(review.comment || "");
+    setImagePreviews(review.images || []);
+    setShowReviewForm(true);
+  };
+
+  // Delete review
+  const handleDeleteReview = async (reviewId) => {
+    if (!window.confirm("Are you sure you want to delete your review?")) return;
+
+    try {
+      const token = localStorage.getItem("token");
+      await axios.delete(
+        `${import.meta.env.VITE_BACKEND_URL}/reviews/${reviewId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      showToast("Review deleted successfully!", "green");
+      
+      // Refresh all data after deletion
+      await Promise.all([
+        fetchJuiceDetails(),
+        fetchReviews(),
+      ]);
+      
+      setHasReviewed(false);
+      setUserReview(null);
+      checkUserCanReview();
+
+    } catch (err) {
+      showToast("Failed to delete review", "red");
     }
   };
 
@@ -302,13 +474,11 @@ const JuiceDetails = () => {
     ));
   };
 
-  // Calculate discount
   const calculateDiscount = (price, originalPrice) => {
     if (!originalPrice || originalPrice <= price) return null;
     return Math.round(((originalPrice - price) / originalPrice) * 100);
   };
 
-  // Category options for filter
   const categories = [
     { value: "", label: "All Categories" },
     { value: "detox", label: "Detox" },
@@ -324,13 +494,18 @@ const JuiceDetails = () => {
     { value: "digestive", label: "Digestive" },
   ];
 
-  // Sort options
   const sortOptions = [
     { value: "new", label: "Newest First" },
     { value: "price_asc", label: "Price: Low to High" },
     { value: "price_desc", label: "Price: High to Low" },
     { value: "rating", label: "Top Rated" },
   ];
+
+  // Get user avatar with fallback
+  const getUserAvatar = (user) => {
+    if (user?.avatar) return user.avatar;
+    return `https://ui-avatars.com/api/?name=${user?.username || 'User'}&background=fb923c&color=fff&size=128`;
+  };
 
   if (pageLoading) return <PageLoader text="Loading juice details..." />;
   if (error || !juice)
@@ -494,12 +669,13 @@ const JuiceDetails = () => {
 
             <h1 className="text-4xl font-black text-gray-800">{juice.name}</h1>
 
+            {/* Rating Display */}
             <div className="flex items-center gap-4">
               <div className="flex">
                 {renderStars(Math.floor(juice.averageRating || 0))}
               </div>
               <span className="text-gray-500">
-                ({juice.reviewCount || 0} Reviews)
+                ({juice.reviewCount || 0} {juice.reviewCount === 1 ? 'Review' : 'Reviews'})
               </span>
             </div>
 
@@ -647,65 +823,148 @@ const JuiceDetails = () => {
             <h2 className="text-3xl font-black bg-gradient-to-r from-orange-600 to-orange-800 bg-clip-text text-transparent">
               Customer Reviews
             </h2>
-            {canReview && !showReviewForm && (
+            
+            {/* Review Button */}
+            {!showReviewForm && !hasReviewed && (
               <button
-                onClick={() => setShowReviewForm(true)}
-                className="bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-orange-700 transition-all"
+                onClick={() => {
+                  if (!localStorage.getItem("token")) {
+                    navigate("/login");
+                    return;
+                  }
+                  if (!userPurchased) {
+                    showToast("You can only review products you have purchased and received!", "orange");
+                    return;
+                  }
+                  setShowReviewForm(true);
+                }}
+                className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                  userPurchased
+                    ? "bg-orange-600 text-white hover:bg-orange-700"
+                    : "bg-gray-300 text-gray-600 cursor-not-allowed"
+                }`}
+                disabled={!userPurchased}
+                title={!userPurchased ? "You need to purchase and receive this product first" : ""}
               >
                 Write a Review
               </button>
             )}
+
+            {hasReviewed && userReview && (
+              <button
+                onClick={() => handleEditReview(userReview)}
+                className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-all"
+              >
+                Edit My Review
+              </button>
+            )}
           </div>
+
+          {/* Purchase Requirement Message */}
+          {!userPurchased && localStorage.getItem("token") && (
+            <div className="mb-6 bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <p className="text-orange-700 text-sm flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                You can only review this product after purchasing and receiving it.
+              </p>
+            </div>
+          )}
 
           {/* Review Form */}
           {showReviewForm && (
             <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-orange-100">
-              <h3 className="text-xl font-bold mb-4">Share Your Experience</h3>
+              <h3 className="text-xl font-bold mb-4">
+                {editReview ? "Edit Your Review" : "Share Your Experience"}
+              </h3>
               <form onSubmit={handleSubmitReview} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Rating
+                    Rating *
                   </label>
                   <div className="flex gap-1">
                     {renderStars(reviewRating, true, setReviewRating)}
                   </div>
                 </div>
+                
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Review
+                    Your Review *
                   </label>
                   <textarea
                     value={reviewComment}
                     onChange={(e) => setReviewComment(e.target.value)}
                     rows="4"
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none"
-                    placeholder="Tell us about your experience..."
+                    placeholder="Tell us about your experience with this product..."
                     required
                   />
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Photos (optional, max 5)
+                    Photos (Optional - Max 5 images)
                   </label>
                   <input
                     type="file"
                     multiple
                     accept="image/*"
-                    onChange={(e) => setReviewImages([...e.target.files])}
+                    onChange={handleReviewImages}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Upload up to 5 images (JPG, PNG, WEBP, max 2MB each)
+                  </p>
                 </div>
+
+                {/* Image Previews */}
+                {imagePreviews.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">
+                      {imagePreviews.length} image(s) selected
+                    </p>
+                    <div className="grid grid-cols-5 gap-2">
+                      {imagePreviews.map((preview, index) => (
+                        <div key={index} className="relative group">
+                          <img
+                            src={preview}
+                            alt={`Preview ${index + 1}`}
+                            className="w-full h-16 object-cover rounded-lg border-2 border-gray-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeReviewImage(index)}
+                            className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-3">
                   <button
                     type="submit"
                     disabled={submittingReview}
                     className="bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-orange-700 transition-all disabled:opacity-50"
                   >
-                    {submittingReview ? <ButtonLoader /> : "Submit Review"}
+                    {submittingReview ? <ButtonLoader /> : (editReview ? "Update Review" : "Submit Review")}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowReviewForm(false)}
+                    onClick={() => {
+                      setShowReviewForm(false);
+                      setEditReview(null);
+                      setReviewRating(5);
+                      setReviewComment("");
+                      setReviewImages([]);
+                      setImagePreviews([]);
+                    }}
                     className="border-2 border-gray-300 text-gray-700 px-6 py-3 rounded-xl font-semibold hover:bg-gray-50 transition-all"
                   >
                     Cancel
@@ -720,62 +979,130 @@ const JuiceDetails = () => {
             <div className="flex justify-center py-12">
               <Loader type="bounce" size="lg" color="orange" />
             </div>
-          ) : reviews.length === 0 ? (
+          ) : displayedReviews.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl shadow-lg">
               <p className="text-gray-600">
-                No reviews yet. Be the first to review!
+                No reviews yet. Be the first to review this product!
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {reviews.map((review) => (
-                <div
-                  key={review._id}
-                  className="bg-white rounded-2xl shadow-lg p-6"
-                >
-                  <div className="flex items-start gap-4">
-                    <img
-                      src={
-                        review.user?.avatar || "https://via.placeholder.com/50"
-                      }
-                      alt={review.user?.username}
-                      className="w-12 h-12 rounded-full object-cover border-2 border-orange-500"
-                    />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-gray-800">
-                          {review.user?.username || "Anonymous"}
-                        </h4>
-                        <span className="text-sm text-gray-400">
-                          {new Date(review.createdAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 my-1">
-                        {renderStars(review.rating)}
-                      </div>
-                      <p className="text-gray-600 mt-2">{review.comment}</p>
-                      {review.images?.length > 0 && (
-                        <div className="flex gap-2 mt-3">
-                          {review.images.map((img, idx) => (
-                            <img
-                              key={idx}
-                              src={img}
-                              alt="Review"
-                              className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:scale-105 transition"
-                              onClick={() => window.open(img, "_blank")}
-                            />
-                          ))}
+            <>
+              <div className="space-y-4">
+                {displayedReviews.map((review) => {
+                  const isCurrentUserReview = review.user?._id === localStorage.getItem("userId");
+                  
+                  return (
+                    <div
+                      key={review._id}
+                      className={`bg-white rounded-2xl shadow-lg p-6 ${isCurrentUserReview ? 'border-2 border-orange-500' : ''}`}
+                    >
+                      <div className="flex items-start gap-4">
+                        {/* User Avatar */}
+                        <img
+                          src={getUserAvatar(review.user)}
+                          alt={review.user?.username}
+                          className="w-12 h-12 rounded-full object-cover border-2 border-orange-500"
+                          onError={(e) => {
+                            e.target.src = `https://ui-avatars.com/api/?name=${review.user?.username || 'User'}&background=fb923c&color=fff&size=128`;
+                          }}
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-bold text-gray-800">
+                                {review.user?.username || "Anonymous"}
+                                {isCurrentUserReview && (
+                                  <span className="ml-2 text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full">
+                                    Your Review
+                                  </span>
+                                )}
+                              </h4>
+                              <p className="text-xs text-gray-500">
+                                Verified Purchase ✓
+                              </p>
+                            </div>
+                            <span className="text-sm text-gray-400">
+                              {new Date(review.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 my-1">
+                            {renderStars(review.rating)}
+                          </div>
+                          <p className="text-gray-600 mt-2">{review.comment}</p>
+                          
+                          {/* Review Images */}
+                          {review.images?.length > 0 && (
+                            <div className="flex gap-2 mt-3 flex-wrap">
+                              {review.images.map((img, idx) => (
+                                <img
+                                  key={idx}
+                                  src={img}
+                                  alt={`Review image ${idx + 1}`}
+                                  className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:scale-105 transition border-2 border-gray-200"
+                                  onClick={() => window.open(img, "_blank")}
+                                />
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Edit/Delete buttons */}
+                          {isCurrentUserReview && (
+                            <div className="flex gap-3 mt-3">
+                              <button
+                                onClick={() => handleEditReview(review)}
+                                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteReview(review._id)}
+                                className="text-sm text-red-600 hover:text-red-800 font-medium"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
+                  );
+                })}
+              </div>
+
+              {/* Load More Reviews Button */}
+              {hasMoreReviews && (
+                <div className="text-center mt-8">
+                  <button
+                    onClick={loadMoreReviews}
+                    disabled={loadingMoreReviews}
+                    className="px-8 py-3 bg-orange-600 text-white rounded-xl font-semibold hover:bg-orange-700 transition-all transform hover:scale-105 disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {loadingMoreReviews ? (
+                      <>
+                        <Loader type="spinner" size="sm" color="white" />
+                        <span>Loading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Load More Reviews</span>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </>
+                    )}
+                  </button>
                 </div>
-              ))}
-            </div>
+              )}
+
+              {/* Review Counter */}
+              <div className="text-center mt-4 text-sm text-gray-500">
+                Showing {displayedReviews.length} of {reviews.length} reviews
+              </div>
+            </>
           )}
         </div>
 
-        {/* All Juices Section with Filters and Pagination */}
+        {/* All Juices Section */}
         <div className="mb-16">
           <div className="flex flex-wrap items-center justify-between mb-6">
             <h2 className="text-3xl font-black bg-gradient-to-r from-orange-600 to-orange-800 bg-clip-text text-transparent">
@@ -827,7 +1154,6 @@ const JuiceDetails = () => {
                     item.price,
                     item.originalPrice,
                   );
-                  const isHovered = hoveredJuice === item._id;
 
                   return (
                     <div
@@ -903,7 +1229,7 @@ const JuiceDetails = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleBuyNow(item._id, 1);
+                              handleBuyNow(item._id, 1, item);
                             }}
                             disabled={
                               buyNowLoadingMap[item._id] || item.stock <= 0

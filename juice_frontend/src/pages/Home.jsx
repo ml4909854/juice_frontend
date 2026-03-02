@@ -532,16 +532,6 @@ const Home = () => {
               </div>
             ))}
           </div>
-
-          {/* View All Reviews Button */}
-          <div className="text-center mt-12">
-            <Link
-              to="/reviews"
-              className="inline-block bg-orange-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-orange-700 transition-all transform hover:scale-105 shadow-lg"
-            >
-              View All Reviews
-            </Link>
-          </div>
         </div>
       </section>
 

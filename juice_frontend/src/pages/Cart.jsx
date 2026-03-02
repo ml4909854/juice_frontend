@@ -6,7 +6,7 @@ import Loader, { PageLoader, ButtonLoader } from "../components/Loader";
 
 const Cart = () => {
   const navigate = useNavigate();
-  
+
   // State
   const [cart, setCart] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -33,6 +33,13 @@ const Cart = () => {
     }
   }, [toast]);
 
+  // Update selectAll when selectedItems changes
+  useEffect(() => {
+    if (cart && cart.items && cart.items.length > 0) {
+      setSelectAll(selectedItems.length === cart.items.length);
+    }
+  }, [selectedItems, cart]);
+
   const showToast = (message, type) => {
     setToast({ show: true, message, type });
   };
@@ -49,31 +56,34 @@ const Cart = () => {
 
       const response = await axios.get(
         `${import.meta.env.VITE_BACKEND_URL}/cart`,
-        { 
-          headers: { 
+        {
+          headers: {
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          } 
-        }
+            "Content-Type": "application/json",
+          },
+        },
       );
 
-      // ✅ Agar cart empty hai to null set karo
-      if (response.data.message === "Cart empty" || !response.data.items || response.data.items.length === 0) {
+      console.log("Cart fetched:", response.data);
+
+      if (
+        response.data.message === "Cart empty" ||
+        !response.data.items ||
+        response.data.items.length === 0
+      ) {
         setCart(null);
         setSelectedItems([]);
-        setSelectAll(false);
       } else {
-        // ✅ Cart mil gaya to set karo
         setCart(response.data);
-        // ✅ Sab items select karo
-        const allItemIds = response.data.items
-          .filter(item => item.juice && item.juice._id)
-          .map(item => item.juice._id);
+
+        const validItems = response.data.items.filter(
+          (item) => item.juice && item.juice._id,
+        );
+        const allItemIds = validItems.map((item) => item.juice._id);
         setSelectedItems(allItemIds);
-        setSelectAll(true);
       }
     } catch (err) {
-      console.error("Error fetching cart:", err.response?.data || err);
+      console.error("Error fetching cart:", err);
       setError(err.response?.data?.message || "Failed to load cart");
     } finally {
       setLoading(false);
@@ -81,259 +91,235 @@ const Cart = () => {
     }
   };
 
-  // ✅ QUANTITY UPDATE - Perfectly kaam karega
+  // UPDATE QUANTITY
   const handleUpdateQuantity = async (juiceId, action) => {
-    // Agar juiceId nahi hai to return
     if (!juiceId) return;
-    
-    // Agar ye item already processing hai to return (multiple clicks rokne ke liye)
     if (processingItems[juiceId]) return;
-    
-    // Processing start
-    setProcessingItems(prev => ({ ...prev, [juiceId]: true }));
+
+    setProcessingItems((prev) => ({ ...prev, [juiceId]: true }));
 
     try {
       const token = localStorage.getItem("token");
-      
-      // API call
+
       const response = await axios.patch(
         `${import.meta.env.VITE_BACKEND_URL}/cart/update/${juiceId}`,
         { action },
-        { 
-          headers: { 
+        {
+          headers: {
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          } 
-        }
+            "Content-Type": "application/json",
+          },
+        },
       );
 
-      // ✅ IMPORTANT - Server se jo response aaya, wahi cart set karo
-      setCart(response.data.cart);
-      
-      // ✅ Agar quantity decrease karke 0 ho gayi to selected items se hatao
+      console.log("Update response:", response.data);
+
+      const updatedCart = response.data.cart;
+      setCart(updatedCart);
+
       if (action === "decrease") {
-        const itemStillExists = response.data.cart.items.some(
-          item => item.juice._id === juiceId
+        const itemStillExists = updatedCart.items.some(
+          (item) => item.juice && item.juice._id === juiceId,
         );
+
         if (!itemStillExists) {
-          // Item remove ho gaya to selected items se hatao
-          setSelectedItems(prev => prev.filter(id => id !== juiceId));
-          
-          // Select all status check karo
-          if (selectAll) {
-            const allItemIds = response.data.cart.items.map(item => item.juice._id);
-            if (selectedItems.length - 1 === allItemIds.length) {
-              setSelectAll(true);
-            } else {
-              setSelectAll(false);
-            }
-          }
+          setSelectedItems((prev) => prev.filter((id) => id !== juiceId));
         }
       }
 
-      // ✅ Success message
       showToast(
-        action === "increase" ? "✅ Quantity increased" : "✅ Quantity decreased",
-        "success"
+        action === "increase"
+          ? "✅ Quantity increased"
+          : "✅ Quantity decreased",
+        "success",
       );
-
     } catch (err) {
-      console.error("Error updating quantity:", err.response?.data || err);
+      console.error("Error updating quantity:", err);
       showToast(
         err.response?.data?.message || "❌ Failed to update quantity",
-        "error"
+        "error",
       );
     } finally {
-      // Processing end - is item ka processing khatam
-      setProcessingItems(prev => ({ ...prev, [juiceId]: false }));
+      setProcessingItems((prev) => ({ ...prev, [juiceId]: false }));
     }
   };
 
-  // ✅ REMOVE ITEM - Perfectly kaam karega, kuch hide nahi hoga
+  // REMOVE ITEM
   const handleRemoveItem = async (juiceId) => {
-    // Agar juiceId nahi hai to return
     if (!juiceId) return;
-    
-    // Agar ye item already processing hai to return
     if (processingItems[juiceId]) return;
-    
-    // Confirmation
+
     if (!window.confirm("Remove this item from cart?")) return;
-    
-    // Processing start
-    setProcessingItems(prev => ({ ...prev, [juiceId]: true }));
+
+    setProcessingItems((prev) => ({ ...prev, [juiceId]: true }));
 
     try {
       const token = localStorage.getItem("token");
 
-      // API call
       const response = await axios.delete(
         `${import.meta.env.VITE_BACKEND_URL}/cart/remove/${juiceId}`,
-        { 
-          headers: { 
+        {
+          headers: {
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          } 
-        }
+            "Content-Type": "application/json",
+          },
+        },
       );
 
-      // ✅ IMPORTANT - Server se jo response aaya, wahi cart set karo
-      setCart(response.data.cart);
-      
-      // ✅ Selected items se hatao
-      setSelectedItems(prev => prev.filter(id => id !== juiceId));
-      
-      // ✅ Select all status update karo
-      if (selectAll) {
-        const allItemIds = response.data.cart.items.map(item => item.juice._id);
-        if (selectedItems.length - 1 === allItemIds.length) {
-          setSelectAll(true);
-        } else {
-          setSelectAll(false);
-        }
+      console.log("Remove response:", response.data);
+
+      const updatedCart = response.data.cart;
+
+      if (updatedCart.items.length === 0) {
+        setCart(null);
+        setSelectedItems([]);
+      } else {
+        setCart(updatedCart);
+        setSelectedItems((prev) => prev.filter((id) => id !== juiceId));
       }
 
-      // ✅ Success message
       showToast("✅ Item removed from cart", "success");
-
     } catch (err) {
-      console.error("Error removing item:", err.response?.data || err);
+      console.error("Error removing item:", err);
       showToast(
         err.response?.data?.message || "❌ Failed to remove item",
-        "error"
+        "error",
       );
     } finally {
-      // Processing end
-      setProcessingItems(prev => ({ ...prev, [juiceId]: false }));
+      setProcessingItems((prev) => ({ ...prev, [juiceId]: false }));
     }
   };
 
-  // ✅ CLEAR CART
+  // CLEAR CART
   const handleClearCart = async () => {
-    if (!window.confirm("Are you sure you want to clear your entire cart?")) return;
-    
+    if (!window.confirm("Are you sure you want to clear your entire cart?"))
+      return;
+
     if (processingItems.clear) return;
-    setProcessingItems(prev => ({ ...prev, clear: true }));
+    setProcessingItems((prev) => ({ ...prev, clear: true }));
 
     try {
       const token = localStorage.getItem("token");
 
-      await axios.delete(
-        `${import.meta.env.VITE_BACKEND_URL}/cart/clear`,
-        { 
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          } 
-        }
-      );
+      await axios.delete(`${import.meta.env.VITE_BACKEND_URL}/cart/clear`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
 
-      // ✅ Cart empty - null set karo
       setCart(null);
       setSelectedItems([]);
-      setSelectAll(false);
       showToast("✅ Cart cleared successfully", "success");
-
     } catch (err) {
-      console.error("Error clearing cart:", err.response?.data || err);
+      console.error("Error clearing cart:", err);
       showToast(
         err.response?.data?.message || "❌ Failed to clear cart",
-        "error"
+        "error",
       );
     } finally {
-      setProcessingItems(prev => ({ ...prev, clear: false }));
+      setProcessingItems((prev) => ({ ...prev, clear: false }));
     }
   };
 
-  // ✅ SELECT/DESELECT ITEM
+  // SELECT/DESELECT ITEM
   const handleSelectItem = (juiceId) => {
     if (!juiceId || !cart) return;
-    
-    setSelectedItems(prev => {
-      // Agar already selected hai to deselect karo
+
+    setSelectedItems((prev) => {
       if (prev.includes(juiceId)) {
-        const newSelected = prev.filter(id => id !== juiceId);
-        setSelectAll(false);
-        return newSelected;
-      } 
-      // Agar selected nahi hai to select karo
-      else {
-        const newSelected = [...prev, juiceId];
-        // Agar sare items select ho gaye to selectAll true karo
-        if (newSelected.length === cart.items.length) {
-          setSelectAll(true);
-        }
-        return newSelected;
+        return prev.filter((id) => id !== juiceId);
+      } else {
+        return [...prev, juiceId];
       }
     });
   };
 
-  // ✅ SELECT ALL
+  // SELECT ALL
   const handleSelectAll = () => {
     if (!cart || !cart.items) return;
-    
+
     if (selectAll) {
-      // Sab deselected
       setSelectedItems([]);
-      setSelectAll(false);
     } else {
-      // Sab selected
       const allItemIds = cart.items
-        .filter(item => item.juice && item.juice._id)
-        .map(item => item.juice._id);
+        .filter((item) => item.juice && item.juice._id)
+        .map((item) => item.juice._id);
       setSelectedItems(allItemIds);
-      setSelectAll(true);
     }
   };
 
-  // ✅ IMAGE ERROR HANDLER
+  // IMAGE ERROR HANDLER
   const handleImageError = (juiceId) => {
     if (juiceId) {
-      setImageErrors(prev => ({ ...prev, [juiceId]: true }));
+      setImageErrors((prev) => ({ ...prev, [juiceId]: true }));
     }
   };
 
-  // ✅ CALCULATE SELECTED ITEMS TOTAL
+  // CALCULATE SELECTED ITEMS TOTAL
   const getSelectedTotal = () => {
     if (!cart || !cart.items || selectedItems.length === 0) return 0;
-    
+
     return cart.items
-      .filter(item => item.juice && selectedItems.includes(item.juice._id))
-      .reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      .filter((item) => item.juice && selectedItems.includes(item.juice._id))
+      .reduce((sum, item) => sum + item.price * item.quantity, 0);
   };
 
-  // ✅ CHECKOUT SELECTED ITEMS
+  // CRITICAL FIX: Get selected items with proper juiceId field
+  const getSelectedCartItems = () => {
+    if (!cart || !cart.items) return [];
+
+    return cart.items
+      .filter((item) => item.juice && selectedItems.includes(item.juice._id))
+      .map((item) => ({
+        juiceId: item.juice._id, // This MUST be juiceId for backend
+        name: item.juice.name,
+        price: item.price,
+        quantity: item.quantity,
+        subtotal: item.price * item.quantity,
+      }));
+  };
+
+  // CALCULATE DISCOUNT (10% on ₹50000+)
+  const getSelectedDiscount = (total) => {
+    return total >= 50000 ? total * 0.1 : 0;
+  };
+
+  // CALCULATE FINAL PRICE
+  const getSelectedFinalPrice = () => {
+    const total = getSelectedTotal();
+    const discount = getSelectedDiscount(total);
+    return total - discount;
+  };
+
+  // In Cart.jsx - handleCheckoutSelected function
   const handleCheckoutSelected = () => {
     if (selectedItems.length === 0) {
       showToast("Please select items to checkout", "error");
       return;
     }
 
-    const selectedCartItems = cart.items.filter(
-      item => item.juice && selectedItems.includes(item.juice._id)
-    );
+    // ✅ Pass full juice objects with all data
+    const selectedCartItems = cart.items
+      .filter((item) => item.juice && selectedItems.includes(item.juice._id))
+      .map((item) => ({
+        juiceId: item.juice._id,
+        name: item.juice.name,
+        price: item.price,
+        quantity: item.quantity,
+        image: item.juice.images?.[0], // ✅ Include image
+        subtotal: item.price * item.quantity,
+      }));
 
     navigate("/checkout", {
       state: {
-        directCheckout: false,
-        selectedItems: selectedCartItems,
+        fromCart: true,
+        items: selectedCartItems,
         totalPrice: getSelectedTotal(),
         discount: getSelectedDiscount(getSelectedTotal()),
-        finalPrice: getSelectedFinalPrice()
-      }
+        finalPrice: getSelectedFinalPrice(),
+      },
     });
-  };
-
-  // ✅ CALCULATE DISCOUNT (10% on ₹50000+)
-  const getSelectedDiscount = (total) => {
-    return total >= 50000 ? total * 0.1 : 0;
-  };
-
-  // ✅ CALCULATE FINAL PRICE
-  const getSelectedFinalPrice = () => {
-    const total = getSelectedTotal();
-    const discount = getSelectedDiscount(total);
-    return total - discount;
   };
 
   if (pageLoading) return <PageLoader text="Loading your cart..." />;
@@ -341,28 +327,35 @@ const Cart = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-7xl mx-auto">
-        
-        {/* ✅ TOAST NOTIFICATION */}
+        {/* TOAST NOTIFICATION */}
         {toast.show && (
-          <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg animate-slide-in ${
-            toast.type === "success" ? "bg-green-500" :
-            toast.type === "error" ? "bg-red-500" :
-            "bg-blue-500"
-          } text-white`}>
+          <div
+            className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg animate-slide-in ${
+              toast.type === "success"
+                ? "bg-green-500"
+                : toast.type === "error"
+                  ? "bg-red-500"
+                  : "bg-blue-500"
+            } text-white`}
+          >
             <div className="flex items-center gap-2">
-              {toast.type === "success" ? "✅" : toast.type === "error" ? "❌" : "ℹ️"}
+              {toast.type === "success"
+                ? "✅"
+                : toast.type === "error"
+                  ? "❌"
+                  : "ℹ️"}
               <span>{toast.message}</span>
             </div>
           </div>
         )}
 
-        {/* ✅ HEADER */}
+        {/* HEADER */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-800">Shopping Cart</h1>
           <p className="text-gray-600 mt-1">Review and manage your items</p>
         </div>
 
-        {/* ✅ ERROR MESSAGE */}
+        {/* ERROR MESSAGE */}
         {error && (
           <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
             <p className="text-red-600 text-sm">{error}</p>
@@ -380,11 +373,15 @@ const Cart = () => {
             <Loader type="bounce" size="lg" color="orange" />
           </div>
         ) : !cart ? (
-          /* ✅ EMPTY CART */
+          /* EMPTY CART */
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
             <div className="text-6xl mb-4">🛒</div>
-            <h2 className="text-2xl font-semibold text-gray-800 mb-2">Your cart is empty</h2>
-            <p className="text-gray-600 mb-6">Looks like you haven't added any items yet</p>
+            <h2 className="text-2xl font-semibold text-gray-800 mb-2">
+              Your cart is empty
+            </h2>
+            <p className="text-gray-600 mb-6">
+              Looks like you haven't added any items yet
+            </p>
             <Link
               to="/juices"
               className="inline-block px-8 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 transition-colors"
@@ -393,14 +390,12 @@ const Cart = () => {
             </Link>
           </div>
         ) : (
-          /* ✅ CART WITH ITEMS */
+          /* CART WITH ITEMS */
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* ✅ LEFT SIDE - CART ITEMS */}
+            {/* LEFT SIDE - CART ITEMS */}
             <div className="lg:col-span-2">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                
-                {/* ✅ CART HEADER - SELECT ALL + CLEAR CART */}
+                {/* CART HEADER */}
                 <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <label className="flex items-center gap-2">
@@ -410,7 +405,9 @@ const Cart = () => {
                         onChange={handleSelectAll}
                         className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
                       />
-                      <span className="text-sm font-medium text-gray-700">Select All</span>
+                      <span className="text-sm font-medium text-gray-700">
+                        Select All
+                      </span>
                     </label>
                     <span className="text-sm text-gray-500">
                       ({selectedItems.length} of {cart.items.length} selected)
@@ -425,8 +422,18 @@ const Cart = () => {
                       <ButtonLoader />
                     ) : (
                       <>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
                         </svg>
                         Clear Cart
                       </>
@@ -434,16 +441,16 @@ const Cart = () => {
                   </button>
                 </div>
 
-                {/* ✅ CART ITEMS LIST - KABHI HIDE NAHI HOGA */}
+                {/* CART ITEMS LIST */}
                 <div className="divide-y divide-gray-200">
                   {cart.items.map((item) => {
                     if (!item || !item.juice || !item.juice._id) return null;
                     const isProcessing = processingItems[item.juice._id];
-                    
+
                     return (
-                      <div 
-                        key={item.juice._id} 
-                        className={`p-4 hover:bg-gray-50 transition-colors ${isProcessing ? 'opacity-50' : ''}`}
+                      <div
+                        key={item.juice._id}
+                        className={`p-4 hover:bg-gray-50 transition-colors ${isProcessing ? "opacity-50" : ""}`}
                       >
                         <div className="flex gap-4">
                           {/* CHECKBOX */}
@@ -458,13 +465,19 @@ const Cart = () => {
                           </div>
 
                           {/* PRODUCT IMAGE */}
-                          <Link to={`/juices/${item.juice._id}`} className={`flex-shrink-0 ${isProcessing ? 'pointer-events-none' : ''}`}>
+                          <Link
+                            to={`/juices/${item.juice._id}`}
+                            className={`flex-shrink-0 ${isProcessing ? "pointer-events-none" : ""}`}
+                          >
                             <div className="w-24 h-24 bg-gray-100 rounded-lg border border-gray-200 overflow-hidden">
-                              {!imageErrors[item.juice._id] ? (
+                              {!imageErrors[item.juice._id] &&
+                              item.juice.images?.[0] ? (
                                 <img
-                                  src={item.juice.images?.[0]}
+                                  src={item.juice.images[0]}
                                   alt={item.juice.name}
-                                  onError={() => handleImageError(item.juice._id)}
+                                  onError={() =>
+                                    handleImageError(item.juice._id)
+                                  }
                                   className="w-full h-full object-cover"
                                   loading="lazy"
                                 />
@@ -477,12 +490,12 @@ const Cart = () => {
                           </Link>
 
                           {/* PRODUCT DETAILS */}
-                          <div className="flex-1">
+                          <div className="flex-1 min-w-0">
                             <div className="flex justify-between">
                               <div>
-                                <Link 
+                                <Link
                                   to={`/juices/${item.juice._id}`}
-                                  className={`font-semibold text-gray-800 hover:text-orange-600 ${isProcessing ? 'pointer-events-none' : ''}`}
+                                  className={`font-semibold text-gray-800 hover:text-orange-600 truncate block ${isProcessing ? "pointer-events-none" : ""}`}
                                 >
                                   {item.juice.name}
                                 </Link>
@@ -493,7 +506,7 @@ const Cart = () => {
                                   Price: ₹{item.price}
                                 </p>
                               </div>
-                              <p className="font-bold text-orange-600">
+                              <p className="font-bold text-orange-600 whitespace-nowrap ml-4">
                                 ₹{(item.price * item.quantity).toFixed(2)}
                               </p>
                             </div>
@@ -502,15 +515,34 @@ const Cart = () => {
                               {/* QUANTITY CONTROLS */}
                               <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
                                 <button
-                                  onClick={() => handleUpdateQuantity(item.juice._id, "decrease")}
+                                  onClick={() =>
+                                    handleUpdateQuantity(
+                                      item.juice._id,
+                                      "decrease",
+                                    )
+                                  }
                                   disabled={isProcessing}
                                   className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
                                 >
                                   {isProcessing ? (
-                                    <Loader type="spinner" size="sm" color="orange" />
+                                    <Loader
+                                      type="spinner"
+                                      size="sm"
+                                      color="orange"
+                                    />
                                   ) : (
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M20 12H4"
+                                      />
                                     </svg>
                                   )}
                                 </button>
@@ -518,15 +550,34 @@ const Cart = () => {
                                   {item.quantity}
                                 </span>
                                 <button
-                                  onClick={() => handleUpdateQuantity(item.juice._id, "increase")}
+                                  onClick={() =>
+                                    handleUpdateQuantity(
+                                      item.juice._id,
+                                      "increase",
+                                    )
+                                  }
                                   disabled={isProcessing}
                                   className="w-8 h-8 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
                                 >
                                   {isProcessing ? (
-                                    <Loader type="spinner" size="sm" color="orange" />
+                                    <Loader
+                                      type="spinner"
+                                      size="sm"
+                                      color="orange"
+                                    />
                                   ) : (
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 4v16m8-8H4"
+                                      />
                                     </svg>
                                   )}
                                 </button>
@@ -542,8 +593,18 @@ const Cart = () => {
                                   <ButtonLoader />
                                 ) : (
                                   <>
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      />
                                     </svg>
                                     Remove
                                   </>
@@ -559,25 +620,32 @@ const Cart = () => {
               </div>
             </div>
 
-            {/* ✅ RIGHT SIDE - ORDER SUMMARY */}
+            {/* RIGHT SIDE - ORDER SUMMARY */}
             <div className="lg:col-span-1">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-24">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4">
                   Order Summary
                 </h2>
 
+                {/* SELECTED ITEMS COUNT */}
+                <p className="text-sm text-gray-600 mb-4">
+                  Selected Items: {selectedItems.length}
+                </p>
+
                 {/* PRICE DETAILS */}
                 <div className="space-y-3">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Subtotal</span>
-                    <span className="font-medium">₹{cart.totalPrice?.toFixed(2) || '0.00'}</span>
+                    <span className="font-medium">
+                      ₹{getSelectedTotal().toFixed(2)}
+                    </span>
                   </div>
-                  
-                  {cart.totalPrice >= 50000 && (
+
+                  {getSelectedTotal() >= 50000 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Discount (10%)</span>
                       <span className="font-medium text-green-600">
-                        -₹{(cart.totalPrice * 0.1).toFixed(2)}
+                        -₹{getSelectedDiscount(getSelectedTotal()).toFixed(2)}
                       </span>
                     </div>
                   )}
@@ -585,7 +653,7 @@ const Cart = () => {
                   <div className="flex justify-between text-lg font-bold border-t border-gray-200 pt-3 mt-3">
                     <span>Total</span>
                     <span className="text-orange-600">
-                      ₹{cart.finalPrice?.toFixed(2) || '0.00'}
+                      ₹{getSelectedFinalPrice().toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -599,7 +667,7 @@ const Cart = () => {
                   >
                     Checkout ({selectedItems.length} items)
                   </button>
-                  
+
                   <Link
                     to="/juices"
                     className="block text-center w-full border border-orange-600 text-orange-600 py-3 rounded-lg font-semibold hover:bg-orange-50 transition-colors"

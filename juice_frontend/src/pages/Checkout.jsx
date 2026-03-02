@@ -1,4 +1,4 @@
-// src/pages/Checkout.jsx
+// src/pages/Checkout.jsx - UPDATED VERSION
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
@@ -7,6 +7,15 @@ import Loader, { PageLoader, ButtonLoader } from "../components/Loader";
 const Checkout = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  
+  // Get data from cart (if coming from cart)
+  const cartItems = location.state?.items || [];
+  const cartTotal = location.state?.totalPrice || 0;
+  const cartDiscount = location.state?.discount || 0;
+  const cartFinal = location.state?.finalPrice || 0;
+  const fromCart = location.state?.fromCart || false;
+
+  // Direct checkout (buy now)
   const directCheckout = location.state?.directCheckout;
   const directJuice = location.state?.juice;
   const directQuantity = location.state?.quantity || 1;
@@ -14,7 +23,6 @@ const Checkout = () => {
   // Loading states
   const [pageLoading, setPageLoading] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [cartData, setCartData] = useState(null);
   const [error, setError] = useState("");
 
   // Address states
@@ -55,6 +63,9 @@ const Checkout = () => {
     finalPrice: 0
   });
 
+  // Image error states
+  const [imageErrors, setImageErrors] = useState({});
+
   // Coupon
   const [couponCode, setCouponCode] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState(null);
@@ -62,38 +73,60 @@ const Checkout = () => {
 
   // Form errors
   const [addressErrors, setAddressErrors] = useState({});
-  const [paymentErrors, setPaymentErrors] = useState({});
 
-  // Fetch data on load
+  // Initialize order summary
   useEffect(() => {
-    fetchAddresses();
-    if (!directCheckout) {
-      fetchCart();
-    } else {
-      // Direct buy now
-      if (directJuice) {
-        const itemTotal = directJuice.price * directQuantity;
-        const discount = itemTotal >= 500 ? itemTotal * 0.1 : 0;
-        
-        setOrderSummary({
-          items: [{
-            juice: directJuice,
-            juiceId: directJuice._id,
-            name: directJuice.name,
-            quantity: directQuantity,
-            price: directJuice.price,
-            subtotal: itemTotal
-          }],
-          totalPrice: itemTotal,
-          discount,
-          finalPrice: itemTotal - discount
-        });
-      }
+    console.log("Checkout received state:", location.state);
+    
+    if (fromCart) {
+      // ✅ Coming from cart with selected items (already have images)
+      console.log("Setting order summary from cart:", cartItems);
+      setOrderSummary({
+        items: cartItems.map(item => ({
+          juiceId: item.juiceId,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          image: item.image,  // ✅ Image already included
+          subtotal: item.subtotal || (item.price * item.quantity)
+        })),
+        totalPrice: cartTotal,
+        discount: cartDiscount,
+        finalPrice: cartFinal
+      });
       setPageLoading(false);
+    } else if (directCheckout && directJuice) {
+      // ✅ Direct buy now - use the juice object
+      console.log("Direct checkout juice:", directJuice);
+      const itemTotal = directJuice.price * directQuantity;
+      const discount = itemTotal >= 500 ? itemTotal * 0.1 : 0;
+      
+      setOrderSummary({
+        items: [{
+          juiceId: directJuice._id,
+          name: directJuice.name,
+          quantity: directQuantity,
+          price: directJuice.price,
+          image: directJuice.images?.[0],  // ✅ Include image
+          subtotal: itemTotal
+        }],
+        totalPrice: itemTotal,
+        discount,
+        finalPrice: itemTotal - discount
+      });
+      setPageLoading(false);
+    } else {
+      // No data - redirect to cart
+      console.log("No checkout data, redirecting to cart");
+      navigate("/cart");
     }
   }, []);
 
-  // Fetch user's saved addresses from backend
+  // Fetch addresses
+  useEffect(() => {
+    fetchAddresses();
+  }, []);
+
   const fetchAddresses = async () => {
     setLoadingAddresses(true);
     try {
@@ -103,7 +136,6 @@ const Checkout = () => {
         return;
       }
 
-      // Fetch profile which contains addresses
       const response = await axios.get(
         `${import.meta.env.VITE_BACKEND_URL}/profile`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -112,7 +144,6 @@ const Checkout = () => {
       const profileAddresses = response.data.profile?.addresses || [];
       setAddresses(profileAddresses);
       
-      // Auto-select default address if exists
       const defaultAddr = profileAddresses.find(addr => addr.isDefault);
       if (defaultAddr) {
         setSelectedAddress(defaultAddr);
@@ -125,47 +156,7 @@ const Checkout = () => {
     }
   };
 
-  const fetchCart = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) {
-        navigate("/login", { state: { from: "/checkout" } });
-        return;
-      }
-
-      const response = await axios.get(
-        `${import.meta.env.VITE_BACKEND_URL}/cart`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      setCartData(response.data);
-      
-      const items = response.data.items?.map(item => ({
-        juiceId: item.juice?._id,
-        name: item.juice?.name,
-        price: item.price,
-        quantity: item.quantity,
-        subtotal: item.price * item.quantity
-      })) || [];
-      
-      const totalPrice = response.data.totalPrice || 0;
-      const discount = response.data.discount || 0;
-
-      setOrderSummary({
-        items,
-        totalPrice,
-        discount,
-        finalPrice: totalPrice - discount
-      });
-
-    } catch (err) {
-      setError("Failed to load cart");
-    } finally {
-      setPageLoading(false);
-    }
-  };
-
-  // Address validation
+  // Validate address form
   const validateAddressForm = () => {
     const errors = {};
     if (!addressForm.street.trim()) errors.street = "Street address required";
@@ -175,37 +166,27 @@ const Checkout = () => {
     if (!/^\d{6}$/.test(addressForm.pincode)) errors.pincode = "Invalid pincode (6 digits)";
     if (!addressForm.phone.trim()) errors.phone = "Phone number required";
     if (!/^\d{10}$/.test(addressForm.phone)) errors.phone = "Invalid phone (10 digits)";
-    if (addressForm.alternatePhone && !/^\d{10}$/.test(addressForm.alternatePhone)) {
-      errors.alternatePhone = "Invalid alternate phone (10 digits)";
-    }
     
     setAddressErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // Save new address to backend
+  // Save address
   const handleSaveAddress = async () => {
     if (!validateAddressForm()) return;
 
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      if (!token) {
-        navigate("/login");
-        return;
-      }
-
-      let response;
       
+      let response;
       if (editingAddress) {
-        // Update existing address
         response = await axios.patch(
           `${import.meta.env.VITE_BACKEND_URL}/profile/addresses/${editingAddress._id}`,
           addressForm,
           { headers: { Authorization: `Bearer ${token}` } }
         );
       } else {
-        // Add new address
         response = await axios.post(
           `${import.meta.env.VITE_BACKEND_URL}/profile/addresses`,
           addressForm,
@@ -213,10 +194,8 @@ const Checkout = () => {
         );
       }
 
-      // Update addresses list
       setAddresses(response.data.addresses);
       
-      // Select the newly added/updated address if it's default or first address
       const updatedAddr = response.data.addresses.find(
         addr => addr.isDefault || (!editingAddress && response.data.addresses.length === 1)
       );
@@ -225,7 +204,6 @@ const Checkout = () => {
         setSelectedAddress(updatedAddr);
       }
 
-      // Reset form
       setShowAddressForm(false);
       setEditingAddress(null);
       setAddressForm({
@@ -244,7 +222,7 @@ const Checkout = () => {
     }
   };
 
-  // Delete address from backend
+  // Delete address
   const handleDeleteAddress = async (addressId) => {
     if (!window.confirm("Delete this address?")) return;
     
@@ -258,7 +236,6 @@ const Checkout = () => {
 
       setAddresses(response.data.addresses);
       
-      // If selected address was deleted, select default or first address
       if (selectedAddress?._id === addressId) {
         const defaultAddr = response.data.addresses.find(addr => addr.isDefault);
         if (defaultAddr) {
@@ -313,6 +290,11 @@ const Checkout = () => {
     setTimeout(() => toast.remove(), 3000);
   };
 
+  // Handle image error
+  const handleImageError = (index) => {
+    setImageErrors(prev => ({ ...prev, [index]: true }));
+  };
+
   // Apply coupon
   const handleApplyCoupon = () => {
     if (!couponCode.trim()) {
@@ -358,15 +340,23 @@ const Checkout = () => {
     showToast("Coupon removed", "info");
   };
 
-  // Format items for backend
+  // Format items for backend - ONLY juiceId needed for order creation
   const formatItemsForBackend = () => {
-    return orderSummary.items.map(item => ({
-      juice: item.juiceId || item.juice?._id,
-      name: item.name || item.juice?.name,
+    if (!orderSummary.items || orderSummary.items.length === 0) {
+      console.error("No items to format");
+      return [];
+    }
+
+    const formattedItems = orderSummary.items.map(item => ({
+      juiceId: item.juiceId,  // Only juiceId needed for backend
+      name: item.name,
       price: item.price,
       quantity: item.quantity,
       subtotal: item.subtotal || (item.price * item.quantity)
     }));
+
+    console.log("Formatted items for backend:", formattedItems);
+    return formattedItems;
   };
 
   // Place order
@@ -386,11 +376,12 @@ const Checkout = () => {
       return;
     }
 
-    if ((paymentMethod === "credit-card" || paymentMethod === "debit-card")) {
-      if (!cardDetails.cardNumber || !cardDetails.cardName || !cardDetails.expiry || !cardDetails.cvv) {
-        showToast("Please fill all card details", "error");
-        return;
-      }
+    // Validate items have juiceId
+    const missingJuiceId = orderSummary.items.some(item => !item.juiceId);
+    if (missingJuiceId) {
+      console.error("Items missing juiceId:", orderSummary.items);
+      showToast("Invalid item data - missing juice ID", "error");
+      return;
     }
 
     setLoading(true);
@@ -403,23 +394,30 @@ const Checkout = () => {
         return;
       }
 
+      // Prepare order data
       const orderData = {
         items: formatItemsForBackend(),
-        address: selectedAddress, // Use the selected address directly
+        address: {
+          street: selectedAddress.street,
+          city: selectedAddress.city,
+          state: selectedAddress.state,
+          pincode: selectedAddress.pincode,
+          phone: selectedAddress.phone,
+          alternatePhone: selectedAddress.alternatePhone || "",
+          addressType: selectedAddress.addressType || "home",
+          country: selectedAddress.country || "India"
+        },
         paymentMethod,
         totalPrice: orderSummary.totalPrice,
         discount: orderSummary.discount,
-        finalPrice: orderSummary.finalPrice,
-        ...(appliedCoupon && { 
-          appliedCoupon: {
-            code: appliedCoupon.code,
-            discount: appliedCoupon.discount
-          }
-        })
+        finalPrice: orderSummary.finalPrice
       };
+
+      console.log("Placing order with data:", orderData);
 
       let response;
       if (directCheckout) {
+        // Buy now
         response = await axios.post(
           `${import.meta.env.VITE_BACKEND_URL}/orders/buy-now`,
           {
@@ -430,12 +428,15 @@ const Checkout = () => {
           { headers: { Authorization: `Bearer ${token}` } }
         );
       } else {
+        // Cart checkout
         response = await axios.post(
           `${import.meta.env.VITE_BACKEND_URL}/orders/place`,
           orderData,
           { headers: { Authorization: `Bearer ${token}` } }
         );
       }
+
+      console.log("Order placed:", response.data);
 
       // Clear cart if not direct checkout
       if (!directCheckout) {
@@ -451,12 +452,13 @@ const Checkout = () => {
 
       showToast("Order placed successfully!", "success");
       
+      // ✅ Pass juice details to orders page
       setTimeout(() => {
         navigate("/orders", { 
           state: { 
             orderPlaced: true,
             orderId: response.data.order?._id || response.data._id,
-            estimatedDelivery: new Date(Date.now() + 30*60000).toISOString()
+            items: orderSummary.items  // ✅ Pass items with images
           } 
         });
       }, 1500);
@@ -539,9 +541,6 @@ const Checkout = () => {
                               {addr.city}, {addr.state} - {addr.pincode}
                             </p>
                             <p className="text-sm text-gray-600 mt-1">📞 {addr.phone}</p>
-                            {addr.alternatePhone && (
-                              <p className="text-sm text-gray-600">📞 {addr.alternatePhone} (Alternate)</p>
-                            )}
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -579,7 +578,7 @@ const Checkout = () => {
                     setAddressForm({
                       street: "", city: "", state: "", pincode: "", 
                       country: "India", phone: "", alternatePhone: "", 
-                      addressType: "home", isDefault: addresses.length === 0 // First address is default
+                      addressType: "home", isDefault: addresses.length === 0
                     });
                   }}
                   className="flex items-center gap-2 text-orange-600 hover:text-orange-800 font-medium"
@@ -626,7 +625,6 @@ const Checkout = () => {
                     <div>
                       <input
                         type="text"
-                        name="street"
                         value={addressForm.street}
                         onChange={(e) => setAddressForm({...addressForm, street: e.target.value})}
                         className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-200 outline-none ${
@@ -643,7 +641,6 @@ const Checkout = () => {
                       <div>
                         <input
                           type="text"
-                          name="city"
                           value={addressForm.city}
                           onChange={(e) => setAddressForm({...addressForm, city: e.target.value})}
                           className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-200 outline-none ${
@@ -658,7 +655,6 @@ const Checkout = () => {
                       <div>
                         <input
                           type="text"
-                          name="state"
                           value={addressForm.state}
                           onChange={(e) => setAddressForm({...addressForm, state: e.target.value})}
                           className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-200 outline-none ${
@@ -676,7 +672,6 @@ const Checkout = () => {
                       <div>
                         <input
                           type="text"
-                          name="pincode"
                           value={addressForm.pincode}
                           onChange={(e) => setAddressForm({...addressForm, pincode: e.target.value})}
                           className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-200 outline-none ${
@@ -692,7 +687,6 @@ const Checkout = () => {
                       <div>
                         <input
                           type="text"
-                          name="country"
                           value={addressForm.country}
                           onChange={(e) => setAddressForm({...addressForm, country: e.target.value})}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none"
@@ -704,7 +698,6 @@ const Checkout = () => {
                     <div>
                       <input
                         type="tel"
-                        name="phone"
                         value={addressForm.phone}
                         onChange={(e) => setAddressForm({...addressForm, phone: e.target.value})}
                         className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-200 outline-none ${
@@ -721,18 +714,12 @@ const Checkout = () => {
                     <div>
                       <input
                         type="tel"
-                        name="alternatePhone"
                         value={addressForm.alternatePhone}
                         onChange={(e) => setAddressForm({...addressForm, alternatePhone: e.target.value})}
-                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-orange-200 outline-none ${
-                          addressErrors.alternatePhone ? "border-red-500" : "border-gray-300 focus:border-orange-500"
-                        }`}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none"
                         placeholder="Alternate Phone (Optional)"
                         maxLength="10"
                       />
-                      {addressErrors.alternatePhone && (
-                        <p className="text-xs text-red-500 mt-1">{addressErrors.alternatePhone}</p>
-                      )}
                     </div>
 
                     <label className="flex items-center gap-2">
@@ -769,7 +756,7 @@ const Checkout = () => {
               )}
             </div>
 
-            {/* Product Review Section */}
+            {/* Product Review Section - FIXED: With images */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
                 2. Review Items
@@ -778,20 +765,32 @@ const Checkout = () => {
               <div className="space-y-4">
                 {orderSummary.items.map((item, idx) => (
                   <div key={idx} className="flex gap-4 border-b border-gray-100 pb-4 last:border-0 last:pb-0">
-                    <img
-                      src={item.juice?.images?.[0] || "https://via.placeholder.com/80"}
-                      alt={item.name || item.juice?.name}
-                      className="w-20 h-20 object-cover rounded-lg border border-gray-200"
-                    />
+                    {/* Product Image */}
+                    <div className="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
+                      {item.image && !imageErrors[idx] ? (
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          onError={() => handleImageError(idx)}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-orange-100">
+                          <span className="text-2xl">🧃</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Product Details */}
                     <div className="flex-1">
                       <h3 className="font-medium text-gray-800">
-                        {item.name || item.juice?.name}
+                        {item.name}
                       </h3>
                       <p className="text-sm text-gray-600 mt-1">
                         Quantity: {item.quantity}
                       </p>
                       <p className="text-sm font-semibold text-orange-600 mt-1">
-                        ₹{item.price} × {item.quantity} = ₹{item.subtotal || (item.price * item.quantity)}
+                        ₹{item.price} × {item.quantity} = ₹{item.price * item.quantity}
                       </p>
                     </div>
                   </div>
@@ -923,10 +922,6 @@ const Checkout = () => {
                     Coupon applied: ₹{appliedCoupon.discount} off
                   </p>
                 )}
-                <div className="flex gap-2 mt-2">
-                  <span className="text-xs px-2 py-1 bg-gray-100 rounded">FIRST20</span>
-                  <span className="text-xs px-2 py-1 bg-gray-100 rounded">SAVE100</span>
-                </div>
               </div>
 
               {/* Price Details */}
