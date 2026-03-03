@@ -1,4 +1,4 @@
-// src/pages/Orders.jsx
+// src/pages/Orders.jsx - UPDATED with better image handling
 import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -57,6 +57,7 @@ const Orders = () => {
         }
       );
 
+      console.log("Fetched orders:", response.data);
       setOrders(response.data.orders || []);
       setTotalPages(response.data.totalPages || 1);
       setTotalOrders(response.data.totalOrders || 0);
@@ -112,14 +113,28 @@ const Orders = () => {
     setTimeout(() => toast.remove(), 3000);
   };
 
-  // Helper function to get juice image
+  // ===== UPDATED: Helper function to get juice image from various paths =====
   const getJuiceImage = (item) => {
-    if (item.juice?.images?.[0]) {
-      return item.juice.images[0];
+    // Check if item has populated juice data
+    if (item.juice) {
+      if (item.juice.images && item.juice.images.length > 0) {
+        return item.juice.images[0];
+      }
+      if (item.juice.image) {
+        return item.juice.image;
+      }
     }
-    if (item.juiceId?.images?.[0]) {
-      return item.juiceId.images[0];
+    
+    // Check if item has juiceId with populated data
+    if (item.juiceId) {
+      if (item.juiceId.images && item.juiceId.images.length > 0) {
+        return item.juiceId.images[0];
+      }
+      if (item.juiceId.image) {
+        return item.juiceId.image;
+      }
     }
+    
     return null;
   };
 
@@ -140,7 +155,7 @@ const Orders = () => {
     return statuses[status] || statuses.placed;
   };
 
-  // ✅ NEW: Get payment status badge
+  // Get payment status badge
   const getPaymentBadge = (status) => {
     const statuses = {
       pending: { bg: "bg-yellow-100", text: "text-yellow-800", label: "Pending", icon: "⏳" },
@@ -291,7 +306,7 @@ const Orders = () => {
                     key={order._id}
                     className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
                   >
-                    {/* Order Header - WITH PAYMENT STATUS */}
+                    {/* Order Header */}
                     <div className="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-4">
                       <div className="flex items-center gap-4">
                         <div>
@@ -307,7 +322,7 @@ const Orders = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* ✅ Payment Status Badge */}
+                        {/* Payment Status Badge */}
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${paymentBadge.bg} ${paymentBadge.text} flex items-center gap-1`}>
                           <span>{paymentBadge.icon}</span>
                           <span>{paymentBadge.label}</span>
@@ -333,7 +348,7 @@ const Orders = () => {
                       </div>
                     </div>
 
-                    {/* Order Summary - All Items Visible */}
+                    {/* Order Items */}
                     <div className="p-4">
                       <div className="space-y-3">
                         {order.items.map((item, idx) => {
@@ -425,7 +440,7 @@ const Orders = () => {
                             </div>
                           </div>
 
-                          {/* Payment Details - WITH PAYMENT STATUS */}
+                          {/* Payment Details */}
                           <div>
                             <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                               <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -438,7 +453,7 @@ const Orders = () => {
                                 <span className="text-gray-600">Method</span>
                                 <span className="font-medium capitalize">{order.paymentMethod}</span>
                               </div>
-                              {/* ✅ Payment Status */}
+                              {/* Payment Status */}
                               <div className="flex justify-between text-sm">
                                 <span className="text-gray-600">Payment Status</span>
                                 <span className={`font-medium ${paymentBadge.text}`}>
