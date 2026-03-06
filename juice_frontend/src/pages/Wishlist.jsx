@@ -1,4 +1,3 @@
-// src/pages/Wishlist.jsx
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -36,10 +35,15 @@ const Wishlist = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setWishlist(response.data.wishlist || []);
-      setCount(response.data.count || 0);
+      if (response.data.success) {
+        setWishlist(response.data.wishlist || []);
+        setCount(response.data.count || 0);
+      } else {
+        setError("Failed to load wishlist");
+      }
     } catch (err) {
-      setError("Failed to load wishlist");
+      console.error("Fetch wishlist error:", err);
+      setError(err.response?.data?.message || "Failed to load wishlist");
     } finally {
       setLoading(false);
       setPageLoading(false);
@@ -54,18 +58,19 @@ const Wishlist = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.delete(
-        `${import.meta.env.VITE_BACKEND_URL}/wishlists/${juiceId}`,
+        `${import.meta.env.VITE_BACKEND_URL}/wishlists/item/${juiceId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Update wishlist
-      setWishlist(prev => prev.filter(item => item.juice._id !== juiceId));
-      setCount(prev => prev - 1);
-
-      // Show success toast
-      showToast("Item removed from wishlist", "red");
+      if (response.data.success) {
+        // Update wishlist with response data
+        setWishlist(response.data.wishlist);
+        setCount(response.data.count);
+        showToast("Item removed from wishlist", "red");
+      }
     } catch (err) {
-      alert("Failed to remove item");
+      console.error("Remove item error:", err);
+      alert(err.response?.data?.message || "Failed to remove item");
     } finally {
       setRemovingItems(prev => ({ ...prev, [juiceId]: false }));
     }
@@ -78,16 +83,19 @@ const Wishlist = () => {
     setClearingWishlist(true);
     try {
       const token = localStorage.getItem("token");
-      await axios.delete(
+      const response = await axios.delete(
         `${import.meta.env.VITE_BACKEND_URL}/wishlists/clear`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setWishlist([]);
-      setCount(0);
-      showToast("Wishlist cleared", "orange");
+      if (response.data.success) {
+        setWishlist([]);
+        setCount(0);
+        showToast("Wishlist cleared successfully", "orange");
+      }
     } catch (err) {
-      alert("Failed to clear wishlist");
+      console.error("Clear wishlist error:", err);
+      alert(err.response?.data?.message || "Failed to clear wishlist");
     } finally {
       setClearingWishlist(false);
     }
@@ -107,18 +115,19 @@ const Wishlist = () => {
 
       await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/cart/add`,
-        { juiceId: juice._id },
+        { juiceId: juice._id, quantity: 1 },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       showToast("✅ Added to cart!", "green");
 
-      // Optional: Remove from wishlist after adding to cart
+      // Optional: Auto remove from wishlist after adding to cart
       // Uncomment if you want this behavior
       // await handleRemoveItem(juice._id);
       
     } catch (err) {
-      alert("Failed to add to cart");
+      console.error("Add to cart error:", err);
+      alert(err.response?.data?.message || "Failed to add to cart");
     } finally {
       setAddingToCart(prev => ({ ...prev, [juice._id]: false }));
     }
@@ -136,23 +145,26 @@ const Wishlist = () => {
       for (const item of wishlist) {
         await axios.post(
           `${import.meta.env.VITE_BACKEND_URL}/cart/add`,
-          { juiceId: item.juice._id },
+          { juiceId: item.juice._id, quantity: 1 },
           { headers: { Authorization: `Bearer ${token}` } }
         );
       }
 
       // Clear wishlist after adding all to cart
-      await axios.delete(
+      const response = await axios.delete(
         `${import.meta.env.VITE_BACKEND_URL}/wishlists/clear`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setWishlist([]);
-      setCount(0);
-      showToast("✨ All items moved to cart!", "green");
+      if (response.data.success) {
+        setWishlist([]);
+        setCount(0);
+        showToast("✨ All items moved to cart!", "green");
+      }
       
     } catch (err) {
-      alert("Failed to move items to cart");
+      console.error("Move all to cart error:", err);
+      alert(err.response?.data?.message || "Failed to move items to cart");
     } finally {
       setClearingWishlist(false);
     }
@@ -190,7 +202,7 @@ const Wishlist = () => {
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-orange-50 py-8 px-4">
       <div className="max-w-7xl mx-auto">
         
-        {/* Header with gradient */}
+        {/* Header */}
         <div className="mb-8 text-center">
           <div className="flex items-center justify-center gap-3 mb-2">
             <svg className="w-8 h-8 text-pink-500" fill="currentColor" viewBox="0 0 24 24">
@@ -313,7 +325,7 @@ const Wishlist = () => {
                         <span className="text-xs font-medium capitalize">{juice.category}</span>
                       </div>
 
-                      {/* Heart Icon (Already in wishlist) */}
+                      {/* Heart Icon */}
                       <div className="absolute top-3 right-3 w-8 h-8 bg-pink-500 text-white rounded-full flex items-center justify-center shadow-lg">
                         <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
                           <path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
