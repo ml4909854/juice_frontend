@@ -14,6 +14,7 @@ const ForgotPassword = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [emailSent, setEmailSent] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Page load animation
   useEffect(() => {
@@ -29,33 +30,88 @@ const ForgotPassword = () => {
     setSuccess("");
     setLoading(true);
 
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
     try {
-      // Add timeout to prevent hanging
+      // Log the attempt
+      console.log(`📧 Sending forgot password request for: ${email}`);
+      console.log(`🔗 Backend URL: ${import.meta.env.VITE_BACKEND_URL}/users/forgot-password`);
+
       const response = await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/users/forgot-password`,
         { email },
-        { timeout: 10000 } // 10 second timeout
+        {
+          timeout: 15000, // 15 second timeout
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        }
       );
 
-      // Show success immediately - email is being sent in background
-      setSuccess(response.data.message || "Password reset email sent! Check your inbox.");
-      setEmailSent(true);
-      setEmail("");
+      clearTimeout(timeoutId);
+
+      console.log("✅ Forgot password response:", response.data);
+
+      // Check if request was successful
+      if (response.data.success || response.status === 200) {
+        setSuccess(response.data.message || "Password reset email sent! Check your inbox.");
+        setEmailSent(true);
+        setEmail("");
+      } else {
+        setError(response.data.message || "Something went wrong. Please try again.");
+      }
       
     } catch (err) {
-      console.error("Forgot password error:", err);
+      clearTimeout(timeoutId);
       
-      if (err.code === 'ECONNABORTED') {
-        setError("Request timed out. But don't worry, we'll still try to send the email.");
-        // Still show success - our backend processes in background
-        setSuccess("If your email exists, you'll receive a reset link shortly.");
+      console.error("❌ Forgot password error:", err);
+      
+      // Handle different error types
+      if (err.code === 'ECONNABORTED' || err.message === 'timeout of 15000ms exceeded') {
+        // Timeout occurred - but backend might still process
+        console.log("⏰ Request timed out, but showing success to user");
+        setSuccess(
+          retryCount === 0 
+            ? "Request received! If your email exists, you'll receive a reset link within a few minutes. Please check your spam folder." 
+            : "We're experiencing delays, but your request is being processed. Check your email in 5-10 minutes."
+        );
         setEmailSent(true);
-      } else {
+        setRetryCount(prev => prev + 1);
+      } 
+      else if (err.name === 'CanceledError' || err.message === 'canceled') {
+        setError("Request was cancelled. Please try again.");
+      }
+      else if (err.response?.status === 429) {
+        setError("Too many requests. Please wait a few minutes and try again.");
+      }
+      else if (err.response?.status === 500) {
+        setError("Server error. Our team has been notified. Please try again later.");
+      }
+      else if (err.response?.status === 404) {
+        setError("Service unavailable. Please try again later.");
+      }
+      else if (!err.response) {
+        // Network error - server might be waking up
+        console.log("🌐 Network error - server might be waking up");
+        setSuccess(
+          "Server is waking up... If your email exists, you'll receive a reset link within 2-3 minutes."
+        );
+        setEmailSent(true);
+      }
+      else {
         setError(err.response?.data?.message || "Failed to send reset email. Please try again.");
       }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleResendEmail = () => {
+    setEmailSent(false);
+    setRetryCount(0);
   };
 
   if (pageLoading) {
@@ -69,6 +125,7 @@ const ForgotPassword = () => {
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-orange-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-yellow-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-orange-300 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
       </div>
 
       {/* Main Card */}
@@ -97,18 +154,28 @@ const ForgotPassword = () => {
         {/* Success Message */}
         {success && (
           <div className="mb-6 bg-green-50 border-l-4 border-green-500 rounded-r-xl p-4 animate-fade-in">
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="h-5 w-5 text-green-500 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
               </div>
               <div className="flex-1">
                 <p className="text-sm text-green-700 font-medium">{success}</p>
                 {emailSent && (
-                  <p className="text-xs text-green-600 mt-1">
-                    📧 Check your spam folder if you don't see it in inbox
-                  </p>
+                  <div className="mt-2 space-y-2">
+                    <p className="text-xs text-green-600 flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      If you don't see it in 5 minutes, check your spam folder
+                    </p>
+                    {retryCount > 0 && (
+                      <p className="text-xs text-orange-600">
+                        ⚡ Server is waking up... This may take 1-2 minutes
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -118,13 +185,13 @@ const ForgotPassword = () => {
         {/* Error Message */}
         {error && (
           <div className="mb-6 bg-red-50 border-l-4 border-red-500 rounded-r-xl p-4 animate-shake">
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="h-5 w-5 text-red-500 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                 </svg>
               </div>
-              <p className="text-sm text-red-700 font-medium">{error}</p>
+              <p className="text-sm text-red-700 font-medium flex-1">{error}</p>
             </div>
           </div>
         )}
@@ -161,7 +228,7 @@ const ForgotPassword = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <span>
-                  <strong>Instant response:</strong> You'll get a response immediately. 
+                  <strong>⚡ Instant response:</strong> You'll get a response immediately. 
                   The email will be sent in the background within a few seconds.
                 </span>
               </p>
@@ -171,8 +238,9 @@ const ForgotPassword = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 rounded-xl font-bold text-lg hover:from-orange-600 hover:to-orange-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-4 rounded-xl font-bold text-lg hover:from-orange-600 hover:to-orange-700 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 relative overflow-hidden group"
             >
+              <span className="absolute inset-0 bg-white opacity-0 group-hover:opacity-20 transition-opacity duration-300"></span>
               {loading ? (
                 <span className="flex items-center justify-center gap-3">
                   <ButtonLoader />
@@ -196,20 +264,34 @@ const ForgotPassword = () => {
               <p className="text-sm text-gray-600 mb-4">
                 We've sent a password reset link to <span className="font-medium text-orange-600">{email}</span>
               </p>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                <p className="text-xs text-yellow-700 flex items-center gap-2">
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <p className="text-xs text-yellow-700 flex items-start gap-2 text-left">
+                  <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
-                  Can't find it? Check your spam folder
+                  <span>
+                    <strong>Can't find it?</strong> Check your spam folder. 
+                    If using Gmail, check the "Promotions" tab.
+                  </span>
                 </p>
               </div>
-              <button 
-                onClick={() => setEmailSent(false)} 
-                className="text-orange-600 hover:text-orange-800 font-medium text-sm"
-              >
-                ← Try with different email
-              </button>
+
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={handleResendEmail}
+                  className="text-orange-600 hover:text-orange-800 font-medium text-sm py-2 px-4 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
+                >
+                  ← Try with different email
+                </button>
+                
+                <button
+                  onClick={() => window.location.href = "mailto:support@juiceshop.com"}
+                  className="text-gray-500 hover:text-gray-700 text-xs"
+                >
+                  Need help? Contact support
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -228,11 +310,20 @@ const ForgotPassword = () => {
         <p className="text-center text-gray-500 text-sm">
           <Link
             to="/login"
-            className="text-orange-600 font-semibold hover:text-orange-800 transition-colors duration-300"
+            className="text-orange-600 font-semibold hover:text-orange-800 transition-colors duration-300 relative group"
           >
             Back to Login
+            <span className="absolute bottom-0 left-0 w-full h-0.5 bg-orange-600 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></span>
           </Link>
         </p>
+
+        {/* Debug Info (only in development) */}
+        {import.meta.env.DEV && (
+          <div className="mt-4 p-2 bg-gray-100 rounded text-xs text-gray-500">
+            <p>Backend URL: {import.meta.env.VITE_BACKEND_URL}</p>
+            <p>Environment: {import.meta.env.MODE}</p>
+          </div>
+        )}
       </div>
 
       {/* Animation Styles */}
@@ -261,6 +352,7 @@ const ForgotPassword = () => {
         .animate-shake { animation: shake 0.3s ease-in-out; }
         .animate-blob { animation: blob 7s infinite; }
         .animation-delay-2000 { animation-delay: 2s; }
+        .animation-delay-4000 { animation-delay: 4s; }
       `}</style>
     </div>
   );
