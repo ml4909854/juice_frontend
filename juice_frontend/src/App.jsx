@@ -24,6 +24,7 @@ const Register = lazy(() => import("./pages/Register"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Profile = lazy(() => import("./pages/Profile"));
+const NotFound = lazy(() => import("./pages/NotFound")); // 👈 ADD THIS
 
 // 🚀 LAZY LOAD ADMIN PAGES
 const AdminLayout = lazy(() => import("./admin/AdminLayout"));
@@ -103,24 +104,8 @@ function App() {
             </Route>
           </Route>
 
-          {/* ===== 404 NOT FOUND ===== */}
-          <Route
-            path="*"
-            element={
-              <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="text-center px-4">
-                  <h1 className="text-6xl font-black text-gray-800 mb-4">404</h1>
-                  <p className="text-xl text-gray-600 mb-8">Page not found</p>
-                  <a
-                    href="/"
-                    className="inline-block bg-orange-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-orange-700 transition-colors"
-                  >
-                    Go Home
-                  </a>
-                </div>
-              </div>
-            }
-          />
+          {/* ===== 404 NOT FOUND - USING COMPONENT ===== */}
+          <Route path="*" element={<NotFound />} /> {/* 👈 UPDATED */}
         </Routes>
       </Layout>
     </BrowserRouter>
